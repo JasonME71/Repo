@@ -1,0 +1,109 @@
+# Number of particles
+variable npart equal 114000
+variable abp_coeff equal 50.0
+variable steps equal 200000
+variable rad equal 100
+variable size equal 100
+variable dt equal 0.0001
+
+# Misc setup
+units lj
+dimension 3
+atom_style sphere
+#boundary p p f
+boundary p p p
+neighbor 0.5 bin
+neigh_modify every 1 delay 0 check yes
+
+# Define 2D box region
+region box block -50 50 -50 50 -50 50
+
+# Create the simulation box with one type of particle
+create_box 1 box
+
+# ABP stuff
+fix active all propel/self velocity ${abp_coeff}
+
+#fix wall harmonic
+#fix 1 all wall/reflect zlo EDGE zhi EDGE
+#fix wallhi all wall/harmonic zhi EDGE 50.0 0.0 1.0 units box
+#fix walllo all wall/harmonic zlo EDGE 50.0 0.0 1.0 units box
+
+# Put particles with type 1 randomly into the region
+create_atoms 1 random ${npart} 324523 box
+set atom * diameter 1.0
+
+# All particles has mass 1
+#mass * 1
+
+# Soft pair interaction between all particles
+pair_style soft 1.0
+pair_coeff * * 10.0
+
+#velocity all create 0.01 543242 dist gaussian
+
+# Minimize energy first to avoid overlapping particles
+minimize 1e-4 1e-4 1000 1000
+reset_timestep 0
+
+# Save images
+shell "mkdir img"
+shell "rm img/*"
+dump img all image 1000 img/t*.jpg type type adiam 1.0 zoom 1.0
+dump_modify img backcolor white boxcolor black
+dump_modify img pad 6
+
+# Save video
+dump video all movie 100 movieTEST.avi type type adiam 1.0 zoom 1.0
+dump_modify video backcolor white boxcolor black
+
+# Integrate Newtons equation of motion with stochastic kicks and friction
+# The kicks and friction model the effect of temperature
+
+# Fix number, volume, energy
+fix integrator all nve
+fix 2 all langevin 1.0 1.0 0.7 48279
+
+#average density calculations
+compute myOtherChunk all chunk/atom bin/3d x lower 5.0 y lower 5.0 z lower 5.0 units box
+
+#compute RDF
+compute myRDF all rdf 100
+fix 4 all ave/time 100 1 100 c_myRDF[*] file tmp.rdf mode vector
+
+#correlation output function
+#compute myKE all ke/atom
+#compute myPE all pe/atom
+#compute myStress all stress/atom NULL pair bond
+
+#compute flux all heat/flux myKE myPE myStress
+
+#fix 5 all ave/correlate 5 100 1000 c_flux[1] c_flux[2] c_flux[3] type auto file flux.correlate ave running
+
+#velocity profile
+fix 6 all ave/chunk 10 100 1000 myOtherChunk vx vz vy norm sample file vel.profile
+
+#Compute MSD and diffusion const
+#Compute MSD for all atoms
+compute myMSD all msd
+
+# Define a variable for the time
+variable time equal "step * ${dt}"
+
+# Output MSD to a file
+fix 7 all ave/time 100 1 100 c_myMSD[4] file msd.txt
+
+#Voronoi Tesselation Calculations
+compute voro all voronoi/atom
+variable density atom mass/c_voro[1]
+dump 1 all custom 1000 voronoi.profile id v_density
+
+# Output time step, temperature, average kinetic and potential energy
+thermo_style custom step temp ke pe
+thermo 100
+
+# Time step of integrator
+timestep ${dt}
+
+# Number of steps to run
+run ${steps}
